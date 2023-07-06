@@ -1,0 +1,178 @@
+# Welcome to Serverless!
+#
+# This file is the main config file for your service.
+# It's very minimal at this point and uses default values.
+# You can always add more config options for more control.
+# We've included some commented out config examples here.
+# Just uncomment any of them to get that config option.
+#
+# For full config options, check the docs:
+#    docs.serverless.com
+#
+# Happy Coding!
+
+service: goservice-stepfunction-viblo # NOTE: update this with your service name
+
+# You can pin your service to only deploy with a specific Serverless version
+# Check out our docs for more details
+# frameworkVersion: "=X.X.X"
+frameworkVersion: "3"
+
+provider:
+  name: aws
+  runtime: go1.x
+  region: ap-southeast-1 
+  # iamRoleStatements:
+  #   - Effect: Allow
+  #     Action:
+  #       - 's3:*' 
+  #       - 'dynamodb:*'
+  #       - 'translate:*'
+  #       - 'comprehend:*' 
+  #     Resource: "*"
+
+plugins:
+  - serverless-add-api-key 
+  - serverless-step-functions
+
+custom:
+  apiKeys:
+    dev:
+    - name: stepfunction-viblo
+      usagePlan:
+        name: "stepfunction-viblo" 
+        description: "stepfunction-viblo usage plan demo"
+        quota:
+          limit: 10000
+          period: MONTH
+        throttle:
+          burstLimit: 100
+          rateLimit: 20
+
+
+# you can overwrite defaults here
+#  stage: dev
+#  region: us-east-1
+
+
+# you can add statements to the Lambda function's IAM Role here
+#  iam:
+#    role:
+#      statements:
+#        - Effect: "Allow"
+#          Action:
+#            - "s3:ListBucket"
+#          Resource: { "Fn::Join" : ["", ["arn:aws:s3:::", { "Ref" : "ServerlessDeploymentBucket" } ] ]  }
+#        - Effect: "Allow"
+#          Action:
+#            - "s3:PutObject"
+#          Resource:
+#            Fn::Join:
+#              - ""
+#              - - "arn:aws:s3:::"
+#                - "Ref" : "ServerlessDeploymentBucket"
+#                - "/*"
+
+# you can define service wide environment variables here
+#  environment:
+#    variable1: value1
+
+package:
+ individually: true
+ exclude:
+   - ./**
+   
+resources:
+  Resources:
+    NEGATIVEFEEDBACK:
+      Type: AWS::DynamoDB::Table
+      Properties:
+        TableName: NEGATIVE_FEEDBACK 
+        BillingMode: PAY_PER_REQUEST
+        AttributeDefinitions:
+          - AttributeName: ID
+            AttributeType: S
+        KeySchema:
+          - AttributeName: ID
+            KeyType: HASH
+    StateMachineRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: CustomerFeedbackSentimentRole
+        Path: /path_of_state_machine_roles/
+        AssumeRolePolicyDocument:
+          Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - states.amazonaws.com
+            Action:
+              - sts:AssumeRole
+        Policies:
+          - PolicyName: statePolicy
+            PolicyDocument:
+              Version: "2012-10-17"
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - 's3:*' 
+                    - 'dynamodb:*'
+                    - 'translate:*'
+                    - 'comprehend:*' 
+                  Resource: "*"
+
+stepFunctions:
+  stateMachines:
+    myStateMachine:
+      name: CustomerFeedbackSentiment
+      role:
+        Fn::GetAtt: ["StateMachineRole", "Arn"]
+      events:
+        - http:
+            path: action/detectsentiment
+            method: POST
+            private: true
+      definition:
+        StartAt: TranslateText
+        States:
+          TranslateText:
+            Type: Task
+            Resource:
+              arn:aws:states:::aws-sdk:translate:translateText
+            Parameters:
+              SourceLanguageCode: vi
+              TargetLanguageCode: en
+              Text.$: $.Comment
+            ResultPath: $.translatedOutput
+            Next: DetectSentiment
+          DetectSentiment:
+            Type: Task
+            Resource:
+              arn:aws:states:::aws-sdk:comprehend:detectSentiment
+            Parameters:
+              LanguageCode: en
+              Text.$: $.translatedOutput
+            ResultPath: $.translatedOutput
+            Next: Is this a Negative feedback ?
+          Is this a Negative feedback ?:
+            Type: Choice
+            Choices: 
+            - Variable: "$.translatedOutput.Sentiment"
+              StringMatches: 'NEGATIVE'
+              Next: DynamoDB PutItem
+            Default: Success
+          Success:
+            Type: Succeed
+          DynamoDB PutItem:
+            Type: Task
+            Resource:
+              arn:aws:states:::dynamodb:putItem
+            Parameters:
+              TableName: NEGATIVE_FEEDBACK
+              Item:
+                ID:
+                  S.$: $$.Execution.Name
+                COMMENT:
+                  S.$: $.Comment
+            End: true
+          
