@@ -1,14 +1,4 @@
-<!--
-title: .'HTTP GET and POST'
-description: 'Boilerplate code for Golang with GET and POST example'
-framework: v1
-platform: AWS
-language: Go
-priority: 10
-authorLink: 'https://github.com/pramonow'
-authorName: 'Pramono Winata'
-authorAvatar: 'https://avatars0.githubusercontent.com/u/28787057?v=4&s=140'
--->
+
 
 # Serverless-golang Stepfunction detect feedback sentiment from customer
 
